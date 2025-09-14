@@ -4,7 +4,7 @@ import { colors } from '../../styles/colors';
 export const styles = StyleSheet.create({
   buttonPrimary: {
     backgroundColor: colors.primary,
-    borderRadius: 5,
+    borderRadius: 30,
     margin: 10,
   },
   buttonSecondary: {

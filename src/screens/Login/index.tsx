@@ -1,42 +1,74 @@
-import React from 'react';
-import { KeyboardAvoidingView, View, Text, TextInput, Platform } from 'react-native';
-
-import { MaterialIcons, Entypo } from "@expo/vector-icons";
-import { styles } from './styles';
-import { colors } from '../../styles/colors';
-import { ComponentButtonInterface } from '../../components';
-import { LoginTypes } from '../../navigations/LoginStackNavigation';
-import { useAuth } from '../../context/auth';
+import React from "react";
+import {
+  View,
+  Text,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  TouchableOpacity,
+  Image,
+} from "react-native";
+import { styles } from "./styles";
+import { ComponentButtonInterface } from "../../components";
+import { LoginTypes } from "../../navigations/LoginStackNavigation";
+import { useAuth } from "../../context/auth";
 
 export function LoginScreen({ navigation }: LoginTypes) {
-  const {setLogin} = useAuth()
+  const { setLogin } = useAuth();
+
   return (
     <View style={styles.container}>
-      <KeyboardAvoidingView behavior='padding' keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}>
-        <Text style={styles.title}>Login</Text>
-        <View style={styles.formRow}>
-          <MaterialIcons name="email" style={styles.icon} />
+      {/* Header Verde */}
+      <View style={styles.header}>
+          <Image
+            source={require("../../../assets/logo.png")}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+        <Text style={styles.logoText}>
+          <Text style={styles.logoBold}>VIVI</Text>MAP{"\n"}
+          <Text style={styles.subTitle}>DIÁRIO DIGITAL</Text>
+        </Text>
+      </View>
+
+      {/* Área Branca com Formulário */}
+      <View style={styles.formContainer}>
+        <KeyboardAvoidingView
+          behavior="padding"
+          keyboardVerticalOffset={Platform.OS === "ios" ? 100 : 0}
+        >
           <TextInput
-            placeholderTextColor={colors.third}
+            placeholder="Usuário"
             style={styles.input}
-            placeholder="Email"
-            keyboardType="email-address"
             autoCapitalize="none"
           />
-        </View>
-        <View style={styles.formRow}>
-          <Entypo name="key" style={styles.icon} />
           <TextInput
-            placeholderTextColor={colors.third}
-            style={styles.input}
             placeholder="Senha"
-            secureTextEntry={true}
-            autoCapitalize="none"
+            style={styles.input}
+            secureTextEntry
           />
-        </View>
-        <ComponentButtonInterface title='Login' type='primary' onPress={()=> setLogin(true)} />
-        <ComponentButtonInterface title='Cadastre-se' type='secondary' onPress={() => navigation.navigate("Register")} />
-      </KeyboardAvoidingView>
+
+          {/* Botão Entrar */}
+          <ComponentButtonInterface
+            title="Entrar"
+            type="primary"
+            onPress={() => setLogin(true)}
+          />
+
+          {/* Botão Google */}
+          <TouchableOpacity style={styles.googleButton}>
+            <Text style={styles.googleText}>Entrar com Google</Text>
+          </TouchableOpacity>
+
+          {/* Links */}
+          <TouchableOpacity>
+            <Text style={styles.link}>Esqueceu a senha?</Text>
+          </TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.navigate('Register')}>
+          <Text style={styles.link}>Primeiro acesso</Text>
+        </TouchableOpacity>
+        </KeyboardAvoidingView>
+      </View>
     </View>
   );
 }

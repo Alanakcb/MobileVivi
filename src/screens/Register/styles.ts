@@ -1,33 +1,56 @@
-import { StyleSheet } from 'react-native';
-import { colors } from '../../styles/colors';
+import { StyleSheet } from "react-native";
+import { colors } from "../../styles/colors";
+
 export const styles = StyleSheet.create({
   container: {
     flex: 1,
-    alignItems: "center",
-    justifyContent: "center"
+    backgroundColor: colors.primary, // verde no topo
   },
-  title: {
-    fontSize: 30,
+  header: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "flex-end",
+    paddingBottom: 20,
+  },
+  logo: {
+    width: 100,
+    height: 100,
+    marginBottom: 10,
+  },
+  logoText: {
+    textAlign: "center",
+    color: colors.white,
+    fontSize: 20,
+    fontWeight: "600",
+  },
+  logoBold: {
     fontWeight: "bold",
-    textAlign: 'center',
-    color: colors.black
+    fontSize: 26,
   },
-  formRow: {
-    margin: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 0.7,
-    borderColor: colors.secondary,
-    borderRadius: 5
+  subTitle: {
+    fontSize: 14,
+    letterSpacing: 1,
   },
-  icon: {
-    fontSize: 28,
-    color: colors.secondary,
-    padding: 5
+  formContainer: {
+    flex: 2,
+    backgroundColor: colors.white,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    padding: 20,
   },
   input: {
-    fontSize: 18,
-    padding: 10,
-    width: "70%"
+    borderBottomWidth: 1,
+    borderBottomColor: colors.primary,
+    marginBottom: 15,
+    fontSize: 16,
+    paddingVertical: 5,
+    color: colors.black,
   },
-})
+  link: {
+    marginTop: 10,
+    textAlign: "center",
+    color: colors.primary,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+});
