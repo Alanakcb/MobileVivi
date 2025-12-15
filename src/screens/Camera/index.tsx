@@ -1,27 +1,45 @@
 ﻿import React, { useState, useEffect, useRef } from "react";
 import { View, TextInput, TouchableOpacity, Image, Text, Alert } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import * as Location from 'expo-location';
+import * as Network from 'expo-network';
 import { Ionicons } from "@expo/vector-icons";
+import { useTheme } from "../../context/theme";
 import { colors } from "../../styles/colors";
 import { styles } from "./styles";
 import { supabase } from '../../services/supabaseClient';
 import { getUser } from '../../services/supabaseAuth';
 import { salvarFoto } from '../../services/supabaseFotos';
+import { cachePhoto, initPhotosCache } from '../../services/photosCache';
 
 export function CameraScreen({ navigation }: any) {
+  const { colors: themeColors } = useTheme();
   const [permission, requestPermission] = useCameraPermissions();
   const [caption, setCaption] = useState("");
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [facing, setFacing] = useState<'back' | 'front'>('back');
   const [flash, setFlash] = useState<'off' | 'on'>('off');
   const [zoom, setZoom] = useState(0);
+  const [location, setLocation] = useState<{ latitude: number, longitude: number } | null>(null);
   const cameraRef = useRef<CameraView>(null);
 
-  // Solicitar permissão da câmera automaticamente quando a tela carregar
+  // Solicitar permissão da câmera e localização automaticamente quando a tela carregar
   useEffect(() => {
     if (permission && !permission.granted && permission.canAskAgain) {
       requestPermission();
     }
+    
+    // Solicitar permissão de localização
+    (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const currentLocation = await Location.getCurrentPositionAsync({});
+        setLocation({
+          latitude: currentLocation.coords.latitude,
+          longitude: currentLocation.coords.longitude
+        });
+      }
+    })();
   }, [permission]);
 
   const toggleCameraFacing = () => {
@@ -59,6 +77,7 @@ export function CameraScreen({ navigation }: any) {
 
   const savePhoto = async () => {
     if (!photoUri) return;
+    
     try {
       // 1. Obter usuário autenticado
       const { data: userData } = await getUser();
@@ -68,7 +87,57 @@ export function CameraScreen({ navigation }: any) {
         return;
       }
 
-      // 2. Preparar upload com FormData
+      // 2. Obter localização atualizada
+      let currentLocation = location;
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const loc = await Location.getCurrentPositionAsync({});
+          currentLocation = {
+            latitude: loc.coords.latitude,
+            longitude: loc.coords.longitude
+          };
+          console.log('Localização obtida:', currentLocation);
+        } else {
+          console.log('Permissão de localização não concedida');
+        }
+      } catch (locError) {
+        console.log('Erro ao obter localização:', locError);
+      }
+
+      // 3. Verificar conectividade
+      const networkState = await Network.getNetworkStateAsync();
+      const isOnline = networkState.isConnected && networkState.isInternetReachable;
+
+      if (!isOnline) {
+        // Modo offline - salvar apenas no cache
+        await initPhotosCache();
+        const tempId = `offline_${Date.now()}`;
+        
+        await cachePhoto({
+          id: tempId,
+          user_id: userId,
+          uri: photoUri,
+          legenda: caption || '',
+          data: new Date().toLocaleDateString('pt-BR'),
+          local: '',
+          latitude: currentLocation?.latitude,
+          longitude: currentLocation?.longitude
+        });
+
+        Alert.alert(
+          '📱 Modo Offline',
+          'Você está sem internet. A foto foi salva localmente e será sincronizada automaticamente quando você voltar a ter conexão.',
+          [{ text: 'OK', onPress: () => {
+            navigation.navigate('Galeria');
+            setPhotoUri(null);
+            setCaption('');
+          }}]
+        );
+        return;
+      }
+
+      // 3. Modo online - fazer upload
       const fileExt = 'jpg';
       const fileName = `${userId}_${Date.now()}.${fileExt}`;
 
@@ -79,7 +148,7 @@ export function CameraScreen({ navigation }: any) {
         type: 'image/jpeg',
       } as unknown as Blob);
 
-      // 3. Upload para Supabase Storage
+      // 4. Upload para Supabase Storage
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('fotos')
         .upload(fileName, formData, {
@@ -88,40 +157,62 @@ export function CameraScreen({ navigation }: any) {
         });
 
       if (uploadError) {
-        Alert.alert('Erro ao enviar foto', uploadError.message);
+        // Se falhar o upload, salvar offline
+        await initPhotosCache();
+        const tempId = `offline_${Date.now()}`;
+        
+        await cachePhoto({
+          id: tempId,
+          user_id: userId,
+          uri: photoUri,
+          legenda: caption || '',
+          data: new Date().toLocaleDateString('pt-BR'),
+          local: '',
+          latitude: currentLocation?.latitude,
+          longitude: currentLocation?.longitude
+        });
+
+        Alert.alert(
+          '⚠️ Falha no Upload',
+          'Não foi possível enviar a foto para o servidor. Ela foi salva localmente e será sincronizada quando possível.',
+          [{ text: 'OK', onPress: () => {
+            navigation.navigate('Galeria');
+            setPhotoUri(null);
+            setCaption('');
+          }}]
+        );
         return;
       }
 
-      // 4. Obter URL pública
+      // 5. Obter URL pública
       const { data: publicUrlData } = supabase.storage
         .from('fotos')
         .getPublicUrl(fileName);
 
       const publicUrl = publicUrlData.publicUrl;
-      if (!publicUrl) {
-        Alert.alert('Erro', 'Não foi possível obter a URL da imagem.');
-        return;
-      }
 
-      // 5. Salvar a foto e legenda na tabela 'fotos'
-      const { error: dbError } = await salvarFoto({
+      // 6. Salvar no banco de dados
+      const { data: fotoData, error: dbError } = await salvarFoto({
         image_url: publicUrl,
         legenda: caption,
-        user_id: userId
+        user_id: userId,
+        latitude: currentLocation?.latitude,
+        longitude: currentLocation?.longitude
       });
 
       if (dbError) {
-        console.error('Erro ao salvar foto no banco:', dbError);
-        Alert.alert('Erro', 'Não foi possível salvar a foto no banco de dados');
+        console.error('Erro ao salvar no banco:', dbError);
+        Alert.alert('Erro', 'Falha ao salvar foto no banco de dados.');
         return;
       }
 
-      // 6. Navegar para Galeria (ela vai recarregar automaticamente)
+      // 7. Navegar para Galeria (o cache será atualizado automaticamente quando a galeria carregar)
       navigation.navigate('Galeria');
       setPhotoUri(null);
       setCaption('');
-      Alert.alert('Sucesso', 'Foto salva com sucesso!');
+      Alert.alert('✅ Sucesso', 'Foto salva e sincronizada com sucesso!');
     } catch (e: any) {
+      console.error('Erro ao salvar foto:', e);
       Alert.alert('Erro', e.message || 'Falha ao salvar foto.');
     }
   };
@@ -133,27 +224,27 @@ export function CameraScreen({ navigation }: any) {
 
   if (!permission) {
     return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
-        <Ionicons name="camera-outline" size={80} color={colors.primary} style={{ marginBottom: 20 }} />
-        <Text style={{ fontSize: 18, textAlign: 'center' }}>Solicitando permissão da câmera...</Text>
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 20, backgroundColor: themeColors.background }]}>
+        <Ionicons name="camera-outline" size={80} color={themeColors.primary} style={{ marginBottom: 20 }} />
+        <Text style={{ fontSize: 18, textAlign: 'center', color: themeColors.text }}>Solicitando permissão da câmera...</Text>
       </View>
     );
   }
   
   if (!permission.granted) {
     return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
-        <Ionicons name="camera-outline" size={80} color={colors.primary} style={{ marginBottom: 20 }} />
-        <Text style={{ fontSize: 18, marginBottom: 10, textAlign: 'center', fontWeight: 'bold' }}>
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 20, backgroundColor: themeColors.background }]}>
+        <Ionicons name="camera-outline" size={80} color={themeColors.primary} style={{ marginBottom: 20 }} />
+        <Text style={{ fontSize: 18, marginBottom: 10, textAlign: 'center', fontWeight: 'bold', color: themeColors.text }}>
           Acesso à câmera necessário
         </Text>
-        <Text style={{ fontSize: 14, marginBottom: 30, textAlign: 'center', color: '#666' }}>
+        <Text style={{ fontSize: 14, marginBottom: 30, textAlign: 'center', color: themeColors.textSecondary }}>
           Precisamos de permissão para acessar sua câmera e tirar fotos
         </Text>
         <TouchableOpacity 
           onPress={requestPermission}
           style={{
-            backgroundColor: colors.primary,
+            backgroundColor: themeColors.primary,
             paddingVertical: 12,
             paddingHorizontal: 30,
             borderRadius: 10,
@@ -167,7 +258,7 @@ export function CameraScreen({ navigation }: any) {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <View style={styles.cameraArea}>
         {photoUri ? (
           <Image source={{ uri: photoUri }} style={{ width: '100%', height: '100%', borderRadius: 12 }} />
@@ -266,21 +357,21 @@ export function CameraScreen({ navigation }: any) {
             <TextInput
               placeholder="Adicione uma legenda..."
               style={{
-                backgroundColor: 'rgba(255,255,255,0.95)',
+                backgroundColor: themeColors.card,
                 borderRadius: 12,
                 paddingHorizontal: 16,
                 paddingVertical: 14,
                 fontSize: 15,
-                color: '#333',
+                color: themeColors.text,
                 elevation: 5,
                 shadowColor: '#000',
                 shadowOffset: { width: 0, height: 2 },
                 shadowOpacity: 0.2,
                 shadowRadius: 4,
                 borderWidth: 1,
-                borderColor: colors.primary,
+                borderColor: themeColors.primary,
               }}
-              placeholderTextColor="#999"
+              placeholderTextColor={themeColors.textSecondary}
               value={caption}
               onChangeText={setCaption}
               multiline
@@ -296,7 +387,7 @@ export function CameraScreen({ navigation }: any) {
             <TouchableOpacity 
               onPress={retakePhoto} 
               style={{ 
-                backgroundColor: 'rgba(255,255,255,0.9)',
+                backgroundColor: themeColors.card,
                 paddingHorizontal: 28,
                 paddingVertical: 14,
                 borderRadius: 25,
@@ -309,19 +400,19 @@ export function CameraScreen({ navigation }: any) {
                 shadowOpacity: 0.3,
                 shadowRadius: 4,
                 borderWidth: 2,
-                borderColor: colors.primary,
+                borderColor: themeColors.primary,
                 minWidth: 150,
               }}
             >
-              <Ionicons name="camera-outline" size={22} color={colors.primary} style={{ marginRight: 8 }} />
-              <Text style={{ color: colors.primary, fontWeight: 'bold', fontSize: 16 }}>Tirar Outra</Text>
+              <Ionicons name="camera-outline" size={22} color={themeColors.primary} style={{ marginRight: 8 }} />
+              <Text style={{ color: themeColors.primary, fontWeight: 'bold', fontSize: 16 }}>Tirar Outra</Text>
             </TouchableOpacity>
 
             {/* Botão Salvar */}
             <TouchableOpacity
               onPress={savePhoto}
               style={{
-                backgroundColor: colors.primary,
+                backgroundColor: themeColors.primary,
                 paddingHorizontal: 28,
                 paddingVertical: 14,
                 borderRadius: 25,

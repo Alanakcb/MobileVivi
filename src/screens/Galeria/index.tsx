@@ -2,17 +2,30 @@ import React, { useState, useEffect } from "react";
 import { View, Text, Image, FlatList, Dimensions, Modal, TouchableOpacity, TextInput, Alert, ActivityIndicator } from "react-native";
 import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from "@react-navigation/native";
+import * as Network from 'expo-network';
+import { useTheme } from "../../context/theme";
 import { styles } from "./styles";
+import { supabase } from "../../services/supabaseClient";
 import { listarFotosStorage, deletarFotoStorage, atualizarLegendaFoto } from "../../services/supabaseFotos";
 import { getUser } from "../../services/supabaseAuth";
+import { 
+  initPhotosCache, 
+  getCachedPhotos, 
+  cacheMultiplePhotos, 
+  updateCachedPhotoCaption,
+  deleteCachedPhoto,
+  hasCachedPhotos 
+} from "../../services/photosCache";
 
 export function GaleriaScreen({ route, navigation }: any) {
+  const { colors: themeColors } = useTheme();
   const [fotos, setFotos] = useState<FotoType[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   type FotoType = { id: string; uri: string; legenda: string; data: string; local: string };
   const [selectedFoto, setSelectedFoto] = useState<null | FotoType>(null);
   const [legendaInput, setLegendaInput] = useState("");
   const [loading, setLoading] = useState(true);
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Carregar fotos do Supabase Storage quando a tela for focada (incluindo após login)
   useFocusEffect(
@@ -24,6 +37,9 @@ export function GaleriaScreen({ route, navigation }: any) {
   const carregarFotos = async () => {
     setLoading(true);
     try {
+      // Inicializar cache
+      await initPhotosCache();
+      
       const { data: userData, error: userError } = await getUser();
       if (userError || !userData?.user) {
         Alert.alert('Erro', 'Usuário não autenticado');
@@ -32,18 +48,142 @@ export function GaleriaScreen({ route, navigation }: any) {
       }
 
       const userId = userData.user.id;
-      const { data, error } = await listarFotosStorage(userId);
-      if (error) {
-        console.error('Erro ao carregar fotos:', error);
-        Alert.alert('Erro', 'Não foi possível carregar as fotos');
-      } else if (data) {
-        setFotos(data);
+      
+      // Verificar conectividade
+      const networkState = await Network.getNetworkStateAsync();
+      const isOnline = networkState.isConnected && networkState.isInternetReachable;
+      
+      console.log('Status de conexão:', isOnline ? 'Online' : 'Offline');
+      
+      if (!isOnline) {
+        // Modo offline - carregar apenas do cache
+        console.log('📱 Modo Offline - Carregando fotos do cache local');
+        const hasCache = await hasCachedPhotos(userId);
+        
+        if (hasCache) {
+          const cachedPhotos = await getCachedPhotos(userId);
+          console.log('Fotos carregadas do cache:', cachedPhotos.length);
+          setFotos(cachedPhotos);
+        } else {
+          Alert.alert(
+            '📱 Sem Conexão',
+            'Você está offline e não há fotos armazenadas localmente. Conecte-se à internet para carregar suas fotos.',
+            [{ text: 'OK' }]
+          );
+        }
+        setLoading(false);
+        return;
+      }
+      
+      // Modo online - sincronizar fotos pendentes primeiro
+      console.log('🌐 Modo Online - Sincronizando fotos pendentes...');
+      if (!isSyncing) {
+        setIsSyncing(true);
+        await syncOfflinePhotos(userId);
+        setIsSyncing(false);
+      }
+      
+      // Buscar do servidor
+      try {
+        const { data, error } = await listarFotosStorage(userId);
+        if (!error && data) {
+          console.log('Fotos carregadas do servidor:', data.length);
+          setFotos(data);
+          
+          // Atualizar cache em background (limpa e reinsere para evitar duplicatas)
+          console.log('Atualizando cache...');
+          cacheMultiplePhotos(data.map(foto => ({
+            ...foto,
+            user_id: userId
+          }))).catch(err => console.log('Erro ao atualizar cache:', err));
+          
+          console.log('✅ Fotos sincronizadas com sucesso');
+        } else if (error) {
+          console.error('Erro ao buscar fotos:', error);
+          // Se falhar, carregar do cache
+          const cachedPhotos = await getCachedPhotos(userId);
+          setFotos(cachedPhotos);
+        }
+      } catch (err) {
+        console.log('Erro ao buscar servidor, usando cache:', err);
+        const cachedPhotos = await getCachedPhotos(userId);
+        setFotos(cachedPhotos);
       }
     } catch (err) {
       console.error('Erro ao carregar fotos:', err);
       Alert.alert('Erro', 'Não foi possível carregar as fotos');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const syncOfflinePhotos = async (userId: string) => {
+    try {
+      const cachedPhotos = await getCachedPhotos(userId);
+      const offlinePhotos = cachedPhotos.filter(foto => 
+        foto.id.startsWith('offline_') || foto.id.startsWith('temp_')
+      );
+      
+      if (offlinePhotos.length === 0) {
+        console.log('Nenhuma foto offline para sincronizar');
+        return;
+      }
+      
+      console.log(`Sincronizando ${offlinePhotos.length} fotos offline...`);
+      
+      for (const foto of offlinePhotos) {
+        try {
+          // Upload da foto para o Storage
+          const fileName = `${userId}_${Date.now()}.jpg`;
+          const formData = new FormData();
+          formData.append('file', {
+            uri: foto.uri,
+            name: fileName,
+            type: 'image/jpeg',
+          } as any);
+
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('fotos')
+            .upload(fileName, formData, {
+              contentType: 'image/jpeg',
+              upsert: true,
+            });
+
+          if (uploadError) {
+            console.log('Erro ao fazer upload da foto offline:', uploadError);
+            continue;
+          }
+
+          // Obter URL pública
+          const { data: publicUrlData } = supabase.storage
+            .from('fotos')
+            .getPublicUrl(fileName);
+
+          // Salvar no banco de dados
+          const { error: dbError } = await supabase.from('fotos').insert([
+            {
+              image_url: publicUrlData.publicUrl,
+              legenda: foto.legenda,
+              user_id: userId,
+              data: new Date().toISOString(),
+              latitude: foto.latitude || null,
+              longitude: foto.longitude || null
+            }
+          ]);
+
+          if (!dbError) {
+            // Remover foto offline do cache
+            await deleteCachedPhoto(foto.id);
+            console.log(`Foto ${foto.id} sincronizada e removida do cache`);
+          }
+        } catch (err) {
+          console.log('Erro ao sincronizar foto:', err);
+        }
+      }
+      
+      console.log('✅ Sincronização de fotos offline concluída');
+    } catch (err) {
+      console.log('Erro ao sincronizar fotos offline:', err);
     }
   };
 
@@ -59,21 +199,43 @@ export function GaleriaScreen({ route, navigation }: any) {
   const handleSaveLegenda = async () => {
     if (!selectedFoto) return;
     
+    // Verificar se a foto é offline
+    if (selectedFoto.id.startsWith('offline_') || selectedFoto.id.startsWith('temp_')) {
+      Alert.alert(
+        '📱 Modo Offline',
+        'Não é possível editar fotos que ainda não foram sincronizadas. Aguarde conexão com a internet.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    
     try {
-      // Salvar legenda no Supabase (usando apenas o ID da foto)
+      // Tentar salvar no Supabase
       const { error } = await atualizarLegendaFoto(selectedFoto.id, legendaInput);
       if (error) {
-        Alert.alert('Erro', 'Não foi possível salvar a legenda');
+        Alert.alert(
+          '⚠️ Sem Conexão',
+          'Não é possível editar a legenda sem conexão com a internet. Tente novamente quando estiver online.',
+          [{ text: 'OK' }]
+        );
         return;
       }
 
       // Atualizar localmente
       setFotos(fotos.map(f => f.id === selectedFoto.id ? { ...f, legenda: legendaInput } : f));
-      Alert.alert('Sucesso', 'Legenda atualizada com sucesso!');
+      
+      // Atualizar no cache
+      await updateCachedPhotoCaption(selectedFoto.id, legendaInput);
+
+      Alert.alert('✅ Sucesso', 'Legenda atualizada!');
       setModalVisible(false);
     } catch (err) {
       console.error('Erro ao salvar legenda:', err);
-      Alert.alert('Erro', 'Não foi possível salvar a legenda');
+      Alert.alert(
+        '⚠️ Sem Conexão',
+        'Não é possível editar a legenda sem conexão com a internet. Tente novamente quando estiver online.',
+        [{ text: 'OK' }]
+      );
     }
   };
 
@@ -101,6 +263,16 @@ export function GaleriaScreen({ route, navigation }: any) {
   const handleDeleteFoto = async () => {
     if (!selectedFoto) return;
     
+    // Verificar se a foto é offline
+    if (selectedFoto.id.startsWith('offline_') || selectedFoto.id.startsWith('temp_')) {
+      Alert.alert(
+        '📱 Modo Offline',
+        'Não é possível excluir fotos que ainda não foram sincronizadas. Aguarde conexão com a internet.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    
     Alert.alert(
       'Confirmar exclusão',
       'Tem certeza que deseja excluir esta foto? Esta ação não pode ser desfeita.',
@@ -121,20 +293,30 @@ export function GaleriaScreen({ route, navigation }: any) {
                 return;
               }
 
-              // Deletar do Storage (isso também remove a legenda)
+              // Tentar deletar do servidor
               const { error } = await deletarFotoStorage(selectedFoto.id, userId);
               if (error) {
-                Alert.alert('Erro', 'Não foi possível excluir a foto do servidor');
+                Alert.alert(
+                  '⚠️ Sem Conexão',
+                  'Não é possível excluir a foto sem conexão com a internet. Tente novamente quando estiver online.',
+                  [{ text: 'OK' }]
+                );
                 return;
               }
-              
-              // Remover da lista local
+
+              // Remover da lista local e do cache
               setFotos(fotos.filter(f => f.id !== selectedFoto.id));
+              await deleteCachedPhoto(selectedFoto.id);
               setModalVisible(false);
-              Alert.alert('Sucesso', 'Foto excluída com sucesso!');
+              
+              Alert.alert('✅ Sucesso', 'Foto excluída!');
             } catch (err) {
               console.error('Erro ao excluir foto:', err);
-              Alert.alert('Erro', 'Não foi possível excluir a foto');
+              Alert.alert(
+                '⚠️ Sem Conexão',
+                'Não é possível excluir a foto sem conexão com a internet. Tente novamente quando estiver online.',
+                [{ text: 'OK' }]
+              );
             }
           }
         }
@@ -144,15 +326,15 @@ export function GaleriaScreen({ route, navigation }: any) {
 
   if (loading) {
     return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color="#8ED36D" />
-        <Text style={{ marginTop: 10, fontSize: 16 }}>Carregando fotos...</Text>
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', backgroundColor: themeColors.background }]}>
+        <ActivityIndicator size="large" color={themeColors.primary} />
+        <Text style={{ marginTop: 10, fontSize: 16, color: themeColors.text }}>Carregando fotos...</Text>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       <FlatList
         data={fotos}
         keyExtractor={item => item.id}
@@ -162,6 +344,8 @@ export function GaleriaScreen({ route, navigation }: any) {
             <Image
               source={{ uri: item.uri }}
               style={{ width: imageSize, height: imageSize, borderRadius: 12, margin: 8 }}
+              onLoad={() => console.log('Imagem carregada:', item.id)}
+              onError={(error) => console.log('Erro ao carregar imagem:', item.id, error.nativeEvent.error)}
             />
           </TouchableOpacity>
         )}
@@ -175,7 +359,7 @@ export function GaleriaScreen({ route, navigation }: any) {
         onRequestClose={() => setModalVisible(false)}
       >
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.7)' }}>
-          <View style={{ backgroundColor: '#fff', borderRadius: 20, width: '90%', maxWidth: 400, overflow: 'hidden', position: 'relative' }}>
+          <View style={{ backgroundColor: themeColors.card, borderRadius: 20, width: '90%', maxWidth: 400, overflow: 'hidden', position: 'relative' }}>
             {/* Botão X para fechar */}
             <TouchableOpacity
               onPress={() => setModalVisible(false)}
@@ -210,25 +394,26 @@ export function GaleriaScreen({ route, navigation }: any) {
               {/* Data */}
               {selectedFoto && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 6 }}>
-                  <Ionicons name="calendar-outline" size={18} color="#666" />
-                  <Text style={{ color: '#666', fontSize: 14 }}>{selectedFoto.data}</Text>
+                  <Ionicons name="calendar-outline" size={18} color={themeColors.textSecondary} />
+                  <Text style={{ color: themeColors.textSecondary, fontSize: 14 }}>{selectedFoto.data}</Text>
                 </View>
               )}
             <TextInput
               placeholder="Digite a legenda..."
-              placeholderTextColor="#999"
+              placeholderTextColor={themeColors.textSecondary}
               value={legendaInput}
               onChangeText={setLegendaInput}
               multiline
               numberOfLines={3}
               style={{ 
                 borderWidth: 1, 
-                borderColor: '#ccc', 
+                borderColor: themeColors.border, 
                 borderRadius: 8, 
                 padding: 10, 
                 marginBottom: 12, 
                 width: '100%', 
-                backgroundColor: '#fff',
+                backgroundColor: themeColors.surface,
+                color: themeColors.text,
                 textAlignVertical: 'top',
                 minHeight: 80
               }}
@@ -265,18 +450,20 @@ export function GaleriaScreen({ route, navigation }: any) {
                   onPress={handleDeleteLegenda}
                   style={{
                     flex: 1,
-                    backgroundColor: '#f0f0f0',
+                    backgroundColor: themeColors.surface,
                     paddingVertical: 12,
                     paddingHorizontal: 16,
                     borderRadius: 10,
                     flexDirection: 'row',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: 6
+                    gap: 6,
+                    borderWidth: 1,
+                    borderColor: themeColors.border
                   }}
                 >
-                  <Ionicons name="trash-outline" size={20} color="#666" />
-                  <Text style={{ color: '#666', fontWeight: 'bold' }}>Limpar</Text>
+                  <Ionicons name="trash-outline" size={20} color={themeColors.textSecondary} />
+                  <Text style={{ color: themeColors.textSecondary, fontWeight: 'bold' }}>Limpar</Text>
                 </TouchableOpacity>
               </View>
 

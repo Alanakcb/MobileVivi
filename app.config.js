@@ -1,4 +1,6 @@
-{
+import 'dotenv/config';
+
+export default {
   "expo": {
     "name": "vivimap",
     "slug": "vivimap",
@@ -19,7 +21,7 @@
         "NSCameraUsageDescription": "Este app precisa acessar sua câmera para tirar fotos."
       },
       "config": {
-        "googleMapsApiKey": "YOUR_GOOGLE_MAPS_API_KEY"
+        "googleMapsApiKey": process.env.GOOGLE_MAPS_API_KEY
       }
     },
     "android": {
@@ -36,21 +38,13 @@
       ],
       "config": {
         "googleMaps": {
-          "apiKey": "YOUR_GOOGLE_MAPS_API_KEY"
+          "apiKey": process.env.GOOGLE_MAPS_API_KEY
         }
       }
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "plugins": [
-      [
-        "react-native-maps",
-        {
-          "googleMapsApiKey": "YOUR_GOOGLE_MAPS_API_KEY"
-        }
-      ]
-    ],
     "extra": {
       "eas": {
         "projectId": "b249f51b-5c24-43f6-8599-821822a15725"

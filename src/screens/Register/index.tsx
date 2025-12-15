@@ -10,11 +10,13 @@ import {
 } from "react-native";
 import { signUp } from '../../services/supabaseAuth';
 import { inserirUsuario } from '../../services/supabaseUsuarios';
+import { useTheme } from "../../context/theme";
 import { styles } from "./styles";
 import { ComponentButtonInterface } from "../../components";
 import { LoginTypes } from "../../navigations/LoginStackNavigation";
 
 export function RegisterScreen({ navigation }: LoginTypes) {
+  const { colors: themeColors } = useTheme();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -85,18 +87,18 @@ export function RegisterScreen({ navigation }: LoginTypes) {
         </View>
 
         {/* Área Branca com Formulário */}
-        <View style={styles.formContainer}>
+        <View style={[styles.formContainer, { backgroundColor: themeColors.background }]}>
           <TextInput
             placeholder="Nome completo"
-            placeholderTextColor="#999"
-            style={styles.input}
+            placeholderTextColor={themeColors.textSecondary}
+            style={[styles.input, { color: themeColors.text, borderBottomColor: themeColors.primary }]}
             value={name}
             onChangeText={setName}
           />
           <TextInput
             placeholder="Email"
-            placeholderTextColor="#999"
-            style={styles.input}
+            placeholderTextColor={themeColors.textSecondary}
+            style={[styles.input, { color: themeColors.text, borderBottomColor: themeColors.primary }]}
             value={email}
             onChangeText={setEmail}
             keyboardType="email-address"
@@ -104,24 +106,24 @@ export function RegisterScreen({ navigation }: LoginTypes) {
           />
           <TextInput
             placeholder="Nome de usuário"
-            placeholderTextColor="#999"
-            style={styles.input}
+            placeholderTextColor={themeColors.textSecondary}
+            style={[styles.input, { color: themeColors.text, borderBottomColor: themeColors.primary }]}
             value={username}
             onChangeText={setUsername}
             autoCapitalize="none"
           />
           <TextInput
             placeholder="Criar senha"
-            placeholderTextColor="#999"
-            style={styles.input}
+            placeholderTextColor={themeColors.textSecondary}
+            style={[styles.input, { color: themeColors.text, borderBottomColor: themeColors.primary }]}
             value={password}
             onChangeText={setPassword}
             secureTextEntry
           />
           <TextInput
             placeholder="Confirmar senha"
-            placeholderTextColor="#999"
-            style={styles.input}
+            placeholderTextColor={themeColors.textSecondary}
+            style={[styles.input, { color: themeColors.text, borderBottomColor: themeColors.primary }]}
             value={confirmPassword}
             onChangeText={setConfirmPassword}
             secureTextEntry
@@ -143,7 +145,7 @@ export function RegisterScreen({ navigation }: LoginTypes) {
           <TouchableOpacity onPress={() => navigation.navigate("Login")}
             disabled={loading}
           >
-            <Text style={styles.link}>Possuo cadastro &gt;</Text>
+            <Text style={[styles.link, { color: themeColors.primary }]}>Possuo cadastro &gt;</Text>
           </TouchableOpacity>
         </View>
       </View>

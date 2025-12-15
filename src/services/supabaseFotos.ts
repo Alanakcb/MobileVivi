@@ -1,9 +1,28 @@
 import { supabase } from './supabaseClient';
 
-export async function salvarFoto({ image_url, legenda, user_id }: { image_url: string, legenda: string, user_id: string }) {
+export async function salvarFoto({ 
+  image_url, 
+  legenda, 
+  user_id, 
+  latitude, 
+  longitude 
+}: { 
+  image_url: string, 
+  legenda: string, 
+  user_id: string,
+  latitude?: number,
+  longitude?: number
+}) {
   // Salva metadados da foto na tabela 'fotos'
   const { data, error } = await supabase.from('fotos').insert([
-    { image_url, legenda, user_id, data: new Date().toISOString() }
+    { 
+      image_url, 
+      legenda, 
+      user_id, 
+      data: new Date().toISOString(),
+      latitude: latitude || null,
+      longitude: longitude || null
+    }
   ]);
   return { data, error };
 }
@@ -31,7 +50,10 @@ export async function listarFotosStorage(user_id: string) {
     uri: foto.image_url,
     legenda: foto.legenda || '',
     data: new Date(foto.data).toLocaleDateString(),
-    local: ''
+    local: '',
+    latitude: foto.latitude,
+    longitude: foto.longitude,
+    created_at: Math.floor(new Date(foto.data).getTime() / 1000)
   }));
 
   return { data: userPhotos, error: null };

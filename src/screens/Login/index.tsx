@@ -12,10 +12,12 @@ import { styles } from "./styles";
 import { ComponentButtonInterface } from "../../components";
 import { LoginTypes } from "../../navigations/LoginStackNavigation";
 import { useAuth } from "../../context/auth";
+import { useTheme } from "../../context/theme";
 import { signIn, getUser } from '../../services/supabaseAuth';
 
 export function LoginScreen({ navigation }: LoginTypes) {
   const { setLogin } = useAuth();
+  const { colors: themeColors } = useTheme();
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [error, setError] = React.useState("");
@@ -64,11 +66,11 @@ export function LoginScreen({ navigation }: LoginTypes) {
         </View>
 
         {/* Área Branca com Formulário */}
-        <View style={styles.formContainer}>
+        <View style={[styles.formContainer, { backgroundColor: themeColors.background }]}>
           <TextInput
             placeholder="Email"
-            placeholderTextColor="#999"
-            style={styles.input}
+            placeholderTextColor={themeColors.textSecondary}
+            style={[styles.input, { color: themeColors.text, borderBottomColor: themeColors.primary }]}
             autoCapitalize="none"
             value={email}
             onChangeText={setEmail}
@@ -76,8 +78,8 @@ export function LoginScreen({ navigation }: LoginTypes) {
           />
           <TextInput
             placeholder="Senha"
-            placeholderTextColor="#999"
-            style={styles.input}
+            placeholderTextColor={themeColors.textSecondary}
+            style={[styles.input, { color: themeColors.text, borderBottomColor: themeColors.primary }]}
             secureTextEntry
             value={password}
             onChangeText={setPassword}
@@ -96,16 +98,16 @@ export function LoginScreen({ navigation }: LoginTypes) {
           />
 
           {/* Botão Google */}
-          <TouchableOpacity style={styles.googleButton} disabled={loading}>
-            <Text style={styles.googleText}>Entrar com Google</Text>
+          <TouchableOpacity style={[styles.googleButton, { borderColor: themeColors.primary }]} disabled={loading}>
+            <Text style={[styles.googleText, { color: themeColors.text }]}>Entrar com Google</Text>
           </TouchableOpacity>
 
           {/* Links */}
           <TouchableOpacity disabled={loading}>
-            <Text style={styles.link}>Esqueceu a senha?</Text>
+            <Text style={[styles.link, { color: themeColors.primary }]}>Esqueceu a senha?</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => navigation.navigate('Register')} disabled={loading}>
-            <Text style={styles.link}>Primeiro acesso</Text>
+            <Text style={[styles.link, { color: themeColors.primary }]}>Primeiro acesso</Text>
           </TouchableOpacity>
         </View>
       </View>

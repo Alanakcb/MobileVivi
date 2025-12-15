@@ -6,18 +6,21 @@ import { TouchableOpacity } from "react-native";
 import { MapaScreen } from "../screens/Mapa";
 import { CameraScreen } from "../screens/Camera";
 import { GaleriaScreen } from "../screens/Galeria";
+import { useTheme } from "../context/theme";
 import { colors } from "../styles/colors";
 
 const Tab = createBottomTabNavigator();
 
 export function BottomTabNavigation() {
+  const { colors: themeColors } = useTheme();
+  
   return (
     <Tab.Navigator
       screenOptions={{
         tabBarShowLabel: false,
         headerStyle: { backgroundColor: colors.primary },
         headerTintColor: colors.white,
-        tabBarStyle: { backgroundColor: colors.white },
+        tabBarStyle: { backgroundColor: themeColors.card },
       }}
     >
       {/* Mapa */}
@@ -38,7 +41,7 @@ export function BottomTabNavigation() {
             <Ionicons
               name="map"
               size={28}
-              color={focused ? colors.primary : "gray"}
+              color={focused ? colors.primary : themeColors.textSecondary}
             />
           ),
         })}
@@ -86,7 +89,7 @@ export function BottomTabNavigation() {
             <Ionicons
               name="images"
               size={28}
-              color={focused ? colors.primary : "gray"}
+              color={focused ? colors.primary : themeColors.textSecondary}
             />
           ),
         })}
